@@ -3,11 +3,10 @@ import { Pool } from "pg";
 
 /**
  * Vercel cannot open the IPv6-only direct host `db.<ref>.supabase.co`.
- * Marketplace sets `POSTGRES_URL` to the IPv4 pooler — prefer that.
- *
- * `pg` + Drizzle uses prepared statements, so the transaction pooler (port 6543)
- * is rewritten to session mode (port 5432) on the same IPv4 pooler host.
+ * If POSTGRES_URL is missing, rewrite DATABASE_URL to the shared IPv4 pooler.
  */
+const FALLBACK_POOLER_REGION = "ap-northeast-2";
+
 function firstEnv(keys: string[]): { key: string; value: string } | null {
   for (const key of keys) {
     const value = process.env[key]?.trim();
@@ -16,12 +15,16 @@ function firstEnv(keys: string[]): { key: string; value: string } | null {
   return null;
 }
 
-function hostnameOf(url: string): string | null {
+function asUrl(value: string): URL | null {
   try {
-    return new URL(url.replace(/^postgres:/, "postgresql:")).hostname;
+    return new URL(value.replace(/^postgres:/, "postgresql:"));
   } catch {
     return null;
   }
+}
+
+function hostnameOf(url: string): string | null {
+  return asUrl(url)?.hostname ?? null;
 }
 
 function isPoolerHost(host: string | null): boolean {
@@ -46,55 +49,77 @@ function projectRef(): string | null {
   return null;
 }
 
+function poolerRegion(): string {
+  return process.env.SUPABASE_REGION?.trim() || FALLBACK_POOLER_REGION;
+}
+
+function poolerHosts(): string[] {
+  if (process.env.SUPABASE_POOLER_HOST?.trim()) return [process.env.SUPABASE_POOLER_HOST.trim()];
+  const region = poolerRegion();
+  return [`aws-1-${region}.pooler.supabase.com`, `aws-0-${region}.pooler.supabase.com`];
+}
+
+function buildPoolerUrl(user: string, password: string, host: string, database: string): string {
+  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:5432/${database}?sslmode=require`;
+}
+
+function rewriteDirectToPooler(url: string): string | null {
+  const parsed = asUrl(url);
+  if (!parsed?.password) return null;
+  const match = parsed.hostname.match(/^db\.([a-z0-9]+)\.supabase\.co$/i);
+  const ref = match?.[1] ?? projectRef();
+  if (!ref) return null;
+  const database = decodeURIComponent(parsed.pathname.replace(/^\//, "")) || "postgres";
+  return buildPoolerUrl(`postgres.${ref}`, parsed.password, poolerHosts()[0], database);
+}
+
 function normalizeUrl(url: string): string {
-  try {
-    const parsed = new URL(url.replace(/^postgres:/, "postgresql:"));
-    for (const key of ["pgbouncer", "connection_limit", "connect_timeout", "pool_timeout", "workaround"]) {
-      parsed.searchParams.delete(key);
-    }
-    if (isPoolerHost(parsed.hostname) && (parsed.port === "6543" || parsed.port === "")) {
-      parsed.port = "5432";
-    }
-    if (!parsed.searchParams.has("sslmode")) parsed.searchParams.set("sslmode", "require");
-    return parsed.toString();
-  } catch {
-    return url;
+  const parsed = asUrl(url);
+  if (!parsed) return url;
+  for (const key of ["pgbouncer", "connection_limit", "connect_timeout", "pool_timeout", "workaround"]) {
+    parsed.searchParams.delete(key);
   }
+  if (isPoolerHost(parsed.hostname) && (parsed.port === "6543" || parsed.port === "")) {
+    parsed.port = "5432";
+  }
+  if (!parsed.searchParams.has("sslmode")) parsed.searchParams.set("sslmode", "require");
+  return parsed.toString();
 }
 
 function assembleFromParts(): string | null {
-  const host = process.env.POSTGRES_HOST?.trim();
   const password = process.env.POSTGRES_PASSWORD?.trim();
-  if (!host || !password || isDirectSupabaseHost(`postgresql://x@${host}:5432/postgres`)) return null;
-
   const ref = projectRef();
-  const configuredUser = process.env.POSTGRES_USER?.trim() || "postgres";
-  const user =
-    isPoolerHost(host) && ref && !configuredUser.includes(".")
-      ? `postgres.${ref}`
-      : configuredUser;
+  if (!password || !ref) return null;
   const database = process.env.POSTGRES_DATABASE?.trim() || "postgres";
-  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:5432/${database}?sslmode=require`;
+  const host = process.env.POSTGRES_HOST?.trim();
+  if (host && isPoolerHost(host)) {
+    const configuredUser = process.env.POSTGRES_USER?.trim() || "postgres";
+    const user = configuredUser.includes(".") ? configuredUser : `postgres.${ref}`;
+    return buildPoolerUrl(user, password, host, database);
+  }
+  return buildPoolerUrl(`postgres.${ref}`, password, poolerHosts()[0], database);
 }
 
 export function resolveDatabaseUrl(): { url: string; source: string; usingPooler: boolean } {
   const pooled = firstEnv(["POSTGRES_URL", "POSTGRES_PRISMA_URL"]);
   const any = firstEnv(["DATABASE_URL", "POSTGRES_URL_NON_POOLING"]);
-
   const candidates = [pooled, any].filter(Boolean) as { key: string; value: string }[];
   const preferred = candidates.find((item) => !isDirectSupabaseHost(item.value)) ?? candidates[0];
   const assembled = assembleFromParts();
+  const rewritten = preferred && isDirectSupabaseHost(preferred.value) ? rewriteDirectToPooler(preferred.value) : null;
 
   const chosen =
     preferred && !isDirectSupabaseHost(preferred.value)
       ? preferred
-      : assembled
-        ? { key: "POSTGRES_HOST", value: assembled }
-        : preferred;
+      : rewritten
+        ? { key: `${preferred?.key ?? "DATABASE_URL"}->pooler`, value: rewritten }
+        : assembled
+          ? { key: "POSTGRES_PASSWORD->pooler", value: assembled }
+          : preferred;
 
   if (!chosen) {
     throw new Error(
-      "Database URL is missing. On Vercel, attach Supabase and use the Transaction pooler URI as DATABASE_URL or POSTGRES_URL (not the db.*.supabase.co direct host).",
+      "Database URL is missing. On Vercel, set POSTGRES_URL to the Supabase Session/Transaction pooler URI (host *.pooler.supabase.com), not db.*.supabase.co.",
     );
   }
 
