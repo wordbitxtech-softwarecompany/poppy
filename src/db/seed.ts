@@ -6,14 +6,8 @@ import { extraPropertySeed } from "@/db/seed-data-extra";
 import { EXTRA_POSTS, POST_LINKS } from "@/db/seed-content";
 import { photo } from "@/lib/images";
 
-/**
- * Idempotent schema guard. The canonical schema lives in `src/db/schema.ts`
- * (applied with `drizzle-kit push`); this raw DDL keeps the app bootable in a
- * fresh sandbox where push has not run yet.
- */
-async function ensureSchema() {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS cities (
+const SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS cities (
       id serial PRIMARY KEY,
       slug text NOT NULL UNIQUE,
       name text NOT NULL,
@@ -27,8 +21,8 @@ async function ensureSchema() {
       is_featured boolean NOT NULL DEFAULT false,
       sort_order integer NOT NULL DEFAULT 0,
       created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE TABLE IF NOT EXISTS agents (
+    )`,
+  `CREATE TABLE IF NOT EXISTS agents (
       id serial PRIMARY KEY,
       slug text NOT NULL UNIQUE,
       name text NOT NULL,
@@ -43,8 +37,8 @@ async function ensureSchema() {
       languages jsonb NOT NULL DEFAULT '[]'::jsonb,
       bio text NOT NULL DEFAULT '',
       created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE TABLE IF NOT EXISTS projects (
+    )`,
+  `CREATE TABLE IF NOT EXISTS projects (
       id serial PRIMARY KEY,
       slug text NOT NULL UNIQUE,
       name text NOT NULL,
@@ -65,8 +59,8 @@ async function ensureSchema() {
       lng double precision NOT NULL DEFAULT 74.3587,
       featured boolean NOT NULL DEFAULT false,
       created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE TABLE IF NOT EXISTS properties (
+    )`,
+  `CREATE TABLE IF NOT EXISTS properties (
       id serial PRIMARY KEY,
       slug text NOT NULL,
       title text NOT NULL,
@@ -106,21 +100,21 @@ async function ensureSchema() {
       listed_by_whatsapp text NOT NULL DEFAULT '',
       views integer NOT NULL DEFAULT 0,
       created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS properties_slug_idx ON properties (slug);
-    ALTER TABLE properties ADD COLUMN IF NOT EXISTS listed_by_name text NOT NULL DEFAULT '';
-    ALTER TABLE properties ADD COLUMN IF NOT EXISTS listed_by_email text NOT NULL DEFAULT '';
-    ALTER TABLE properties ADD COLUMN IF NOT EXISTS listed_by_phone text NOT NULL DEFAULT '';
-    ALTER TABLE properties ADD COLUMN IF NOT EXISTS listed_by_whatsapp text NOT NULL DEFAULT '';
-    CREATE TABLE IF NOT EXISTS listing_media (
+    )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS properties_slug_idx ON properties (slug)`,
+  `ALTER TABLE properties ADD COLUMN IF NOT EXISTS listed_by_name text NOT NULL DEFAULT ''`,
+  `ALTER TABLE properties ADD COLUMN IF NOT EXISTS listed_by_email text NOT NULL DEFAULT ''`,
+  `ALTER TABLE properties ADD COLUMN IF NOT EXISTS listed_by_phone text NOT NULL DEFAULT ''`,
+  `ALTER TABLE properties ADD COLUMN IF NOT EXISTS listed_by_whatsapp text NOT NULL DEFAULT ''`,
+  `CREATE TABLE IF NOT EXISTS listing_media (
       id serial PRIMARY KEY,
       file_name text NOT NULL,
       mime_type text NOT NULL,
       byte_size integer NOT NULL,
       data_base64 text NOT NULL,
       created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE TABLE IF NOT EXISTS posts (
+    )`,
+  `CREATE TABLE IF NOT EXISTS posts (
       id serial PRIMARY KEY,
       slug text NOT NULL UNIQUE,
       title text NOT NULL,
@@ -133,9 +127,9 @@ async function ensureSchema() {
       tags jsonb NOT NULL DEFAULT '[]'::jsonb,
       links jsonb NOT NULL DEFAULT '[]'::jsonb,
       published_at timestamptz NOT NULL DEFAULT now()
-    );
-    ALTER TABLE posts ADD COLUMN IF NOT EXISTS links jsonb NOT NULL DEFAULT '[]'::jsonb;
-    CREATE TABLE IF NOT EXISTS testimonials (
+    )`,
+  `ALTER TABLE posts ADD COLUMN IF NOT EXISTS links jsonb NOT NULL DEFAULT '[]'::jsonb`,
+  `CREATE TABLE IF NOT EXISTS testimonials (
       id serial PRIMARY KEY,
       name text NOT NULL,
       role text NOT NULL,
@@ -144,8 +138,8 @@ async function ensureSchema() {
       rating integer NOT NULL DEFAULT 5,
       initials text NOT NULL DEFAULT 'EW',
       sort_order integer NOT NULL DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS inquiries (
+    )`,
+  `CREATE TABLE IF NOT EXISTS inquiries (
       id serial PRIMARY KEY,
       type text NOT NULL DEFAULT 'property',
       name text NOT NULL,
@@ -160,33 +154,33 @@ async function ensureSchema() {
       project_slug text NOT NULL DEFAULT '',
       source text NOT NULL DEFAULT 'website',
       created_at timestamptz NOT NULL DEFAULT now()
-    );
-    ALTER TABLE inquiries ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'new';
-    ALTER TABLE inquiries ADD COLUMN IF NOT EXISTS admin_note text NOT NULL DEFAULT '';
-    ALTER TABLE inquiries ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
-    CREATE TABLE IF NOT EXISTS users (
+    )`,
+  `ALTER TABLE inquiries ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'new'`,
+  `ALTER TABLE inquiries ADD COLUMN IF NOT EXISTS admin_note text NOT NULL DEFAULT ''`,
+  `ALTER TABLE inquiries ADD COLUMN IF NOT EXISTS reviewed_at timestamptz`,
+  `CREATE TABLE IF NOT EXISTS users (
       id serial PRIMARY KEY,
       name text NOT NULL,
       email text NOT NULL UNIQUE,
       phone text NOT NULL DEFAULT '',
       password_hash text NOT NULL,
       created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE TABLE IF NOT EXISTS favorites (
+    )`,
+  `CREATE TABLE IF NOT EXISTS favorites (
       id serial PRIMARY KEY,
       user_id integer NOT NULL,
       property_id integer NOT NULL,
       created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS favorites_user_property_idx ON favorites (user_id, property_id);
-    CREATE TABLE IF NOT EXISTS saved_searches (
+    )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS favorites_user_property_idx ON favorites (user_id, property_id)`,
+  `CREATE TABLE IF NOT EXISTS saved_searches (
       id serial PRIMARY KEY,
       user_id integer NOT NULL,
       label text NOT NULL,
       query_string text NOT NULL DEFAULT '',
       created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE TABLE IF NOT EXISTS listing_submissions (
+    )`,
+  `CREATE TABLE IF NOT EXISTS listing_submissions (
       id serial PRIMARY KEY,
       status text NOT NULL DEFAULT 'pending',
       admin_note text NOT NULL DEFAULT '',
@@ -221,8 +215,8 @@ async function ensureSchema() {
       image_urls jsonb NOT NULL DEFAULT '[]'::jsonb,
       created_at timestamptz NOT NULL DEFAULT now(),
       reviewed_at timestamptz
-    );
-    UPDATE properties p
+    )`,
+  `UPDATE properties p
     SET listed_by_name = s.name,
         listed_by_email = s.email,
         listed_by_phone = s.phone,
@@ -230,8 +224,24 @@ async function ensureSchema() {
     FROM listing_submissions s
     WHERE s.property_id = p.id
       AND s.status = 'approved'
-      AND coalesce(p.listed_by_phone, '') = '';
-  `);
+      AND coalesce(p.listed_by_phone, '') = ''`,
+];
+
+function firstCount(result: unknown): number {
+  const rows = Array.isArray(result) ? result : ((result as { rows?: Array<{ total?: number }> })?.rows ?? []);
+  return Number(rows[0]?.total ?? 0);
+}
+
+/**
+ * Idempotent schema guard. The canonical schema lives in `src/db/schema.ts`
+ * (applied with `drizzle-kit push`); this raw DDL keeps the app bootable in a
+ * fresh sandbox where push has not run yet.
+ * Statements are executed one at a time so the Supabase pooler can run them.
+ */
+async function ensureSchema() {
+  for (const statement of SCHEMA_STATEMENTS) {
+    await db.execute(sql.raw(statement));
+  }
 }
 
 /** Reference content is refreshed on every cold start; listings are inserted once. */
@@ -299,8 +309,10 @@ async function refreshReferenceContent() {
   await db.delete(posts).where(inArray(posts.slug, postRows.map((post) => post.slug)));
   await db.insert(posts).values(postRows);
 
-  const { rows } = await db.execute<{ total: number }>(sql`select cast(count(*) as int) as total from testimonials`);
-  if (Number(rows[0]?.total ?? 0) === 0) {
+  const testimonialCount = firstCount(
+    await db.execute(sql`select cast(count(*) as int) as total from testimonials`),
+  );
+  if (testimonialCount === 0) {
     await db.insert(testimonials).values(testimonialSeed);
   }
 }
@@ -357,7 +369,10 @@ async function seedProperties() {
 
 async function runSeed() {
   await ensureSchema();
-  await refreshReferenceContent();
+  const cityCount = firstCount(await db.execute(sql`select cast(count(*) as int) as total from cities`));
+  if (cityCount === 0) {
+    await refreshReferenceContent();
+  }
   await seedProperties();
 }
 
