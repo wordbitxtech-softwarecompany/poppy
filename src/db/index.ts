@@ -60,7 +60,7 @@ function poolerHosts(): string[] {
 }
 
 function buildPoolerUrl(user: string, password: string, host: string, database: string): string {
-  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:5432/${database}?sslmode=require`;
+  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:5432/${database}?sslmode=no-verify`;
 }
 
 function rewriteDirectToPooler(url: string): string | null {
@@ -82,7 +82,9 @@ function normalizeUrl(url: string): string {
   if (isPoolerHost(parsed.hostname) && (parsed.port === "6543" || parsed.port === "")) {
     parsed.port = "5432";
   }
-  if (!parsed.searchParams.has("sslmode")) parsed.searchParams.set("sslmode", "require");
+  if (!parsed.searchParams.has("sslmode") || parsed.searchParams.get("sslmode") === "require") {
+    parsed.searchParams.set("sslmode", "no-verify");
+  }
   return parsed.toString();
 }
 
