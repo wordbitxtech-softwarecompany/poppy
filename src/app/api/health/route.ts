@@ -1,11 +1,17 @@
-import { db, databaseConnectionMeta } from "@/db";
-import { sql } from "drizzle-orm";
+import { databaseConnectionMeta, pool } from "@/db";
 
 export const dynamic = "force-dynamic";
 
+function serializeError(error: unknown) {
+  if (!(error instanceof Error)) return { message: String(error) };
+  const err = error as Error & { code?: string; cause?: unknown };
+  const cause = err.cause instanceof Error ? { message: err.cause.message, code: (err.cause as { code?: string }).code } : undefined;
+  return { message: err.message, code: err.code, cause };
+}
+
 export async function GET() {
   try {
-    await db.execute(sql`select 1`);
+    await pool.query("select 1");
     return Response.json({
       ok: true,
       database: "connected",
@@ -14,7 +20,6 @@ export async function GET() {
       host: databaseConnectionMeta.host,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "unknown";
     return Response.json(
       {
         ok: false,
@@ -22,11 +27,10 @@ export async function GET() {
         source: databaseConnectionMeta.source,
         usingPooler: databaseConnectionMeta.usingPooler,
         host: databaseConnectionMeta.host,
-        hint: databaseConnectionMeta.usingPooler
-          ? message
-          : "Vercel cannot reach the IPv6-only db.*.supabase.co host. Set DATABASE_URL or POSTGRES_URL to the Supabase Transaction pooler URI.",
+        error: serializeError(error),
       },
       { status: 500 },
     );
   }
 }
+

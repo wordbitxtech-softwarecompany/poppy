@@ -56,7 +56,7 @@ function poolerRegion(): string {
 function poolerHosts(): string[] {
   if (process.env.SUPABASE_POOLER_HOST?.trim()) return [process.env.SUPABASE_POOLER_HOST.trim()];
   const region = poolerRegion();
-  return [`aws-1-${region}.pooler.supabase.com`, `aws-0-${region}.pooler.supabase.com`];
+  return [`aws-0-${region}.pooler.supabase.com`, `aws-1-${region}.pooler.supabase.com`];
 }
 
 function buildPoolerUrl(user: string, password: string, host: string, database: string): string {
