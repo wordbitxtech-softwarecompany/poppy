@@ -5,7 +5,24 @@
  */
 export function photo(id: number, width = 1200, height?: number): string {
   const h = height ?? Math.round((width * 2) / 3);
-  return `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=${width}&h=${h}`;
+  return `/media/pexels/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=${width}&h=${h}`;
+}
+
+/** Serve previously stored Pexels CDN URLs from this app so they are not blocked in-browser. */
+export function mediaUrl(url: string): string {
+  if (!url) return url;
+  return url.replace("https://images.pexels.com", "/media/pexels");
+}
+
+export function localizeImages<T>(row: T): T {
+  if (!row || typeof row !== "object") return row;
+  const next = { ...(row as Record<string, unknown>) };
+  if (typeof next.coverImage === "string") next.coverImage = mediaUrl(next.coverImage);
+  if (typeof next.imageUrl === "string") next.imageUrl = mediaUrl(next.imageUrl);
+  if (Array.isArray(next.images) && next.images.every((value) => typeof value === "string")) {
+    next.images = next.images.map((value) => mediaUrl(value as string));
+  }
+  return next as T;
 }
 
 export const photos = {

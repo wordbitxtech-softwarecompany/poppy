@@ -45,6 +45,7 @@ const KNOWN_PREFIXES = [
   "/_next",
   "/api",
   "/images",
+  "/media",
   "/sitemaps",
 ];
 
@@ -110,5 +111,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|images|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|images|media|favicon.ico).*)"],
 };

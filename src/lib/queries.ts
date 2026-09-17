@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { ensureSeeded } from "@/db/seed";
+import { localizeImages } from "@/lib/images";
 import {
   agents,
   cities,
@@ -102,7 +103,7 @@ export async function searchProperties(filters: PropertyFilters = {}) {
   ]);
 
   const total = countRows[0]?.total ?? 0;
-  return { items, total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
+  return { items: items.map(localizeImages), total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
 }
 
 /** Listing query used by the curated SEO landing pages. */
@@ -114,13 +115,13 @@ export async function getLandingProperties(filters: PropertyFilters, limit = 9) 
     db.select().from(properties).where(where).orderBy(...orderFor(filters.sort)).limit(limit),
     db.select({ total: sql<number>`cast(count(*) as int)` }).from(properties).where(where),
   ]);
-  return { items, total: countRows[0]?.total ?? 0 };
+  return { items: items.map(localizeImages), total: countRows[0]?.total ?? 0 };
 }
 
 export async function getPropertyBySlug(slug: string): Promise<Property | undefined> {
   await ensureSeeded();
   const rows = await db.select().from(properties).where(eq(properties.slug, slug)).limit(1);
-  return rows[0];
+  return rows[0] ? localizeImages(rows[0]) : undefined;
 }
 
 export async function getAllPropertySlugs() {
@@ -145,7 +146,7 @@ export async function getSimilarProperties(property: Property, limit = 3) {
     )
     .orderBy(desc(properties.featured), desc(properties.createdAt))
     .limit(limit);
-  return rows;
+  return rows.map(localizeImages);
 }
 
 /** Nearby is geographic proximity, not merely matching purpose or property type. */
@@ -169,45 +170,49 @@ export async function getNearbyProperties(property: Property, limit = 6, radiusK
     ))
     .orderBy(asc(distance), asc(properties.id))
     .limit(Math.max(1, Math.min(12, limit)));
-  return rows.map((row) => ({ ...row.property, distanceKm: Number(row.distanceKm) }));
+  return rows.map((row) => ({ ...localizeImages(row.property), distanceKm: Number(row.distanceKm) }));
 }
 
 export async function getFeaturedProperties(limit = 4) {
   await ensureSeeded();
-  return db
+  const rows = await db
     .select()
     .from(properties)
     .where(and(eq(properties.featured, true), eq(properties.verified, true)))
     .orderBy(desc(properties.createdAt))
     .limit(limit);
+  return rows.map(localizeImages);
 }
 
 export async function getPropertiesByIds(ids: number[]) {
   await ensureSeeded();
   if (ids.length === 0) return [];
-  return db.select().from(properties).where(inArray(properties.id, ids));
+  const rows = await db.select().from(properties).where(inArray(properties.id, ids));
+  return rows.map(localizeImages);
 }
 
 export async function getMapProperties(filters: PropertyFilters = {}, limit = 24) {
   await ensureSeeded();
   const conditions = buildConditions(filters);
-  return db
+  const rows = await db
     .select()
     .from(properties)
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(properties.featured), desc(properties.views))
     .limit(limit);
+  return rows.map(localizeImages);
 }
 
 export async function getCities() {
   await ensureSeeded();
-  return db.select().from(cities).orderBy(asc(cities.sortOrder));
+  const rows = await db.select().from(cities).orderBy(asc(cities.sortOrder));
+  return rows.map(localizeImages);
 }
 
 export async function getCityBySlug(slug: string) {
   await ensureSeeded();
   const rows = await db.select().from(cities).where(eq(cities.slug, slug)).limit(1);
-  return rows[0];
+  return rows[0] ? localizeImages(rows[0]) : rows[0];
 }
 
 export async function getCityListingCounts() {
@@ -225,13 +230,13 @@ export async function getProjects(limit = 12, featuredOnly = false) {
   const rows = featuredOnly
     ? await query.where(eq(projects.featured, true)).orderBy(desc(projects.createdAt)).limit(limit)
     : await query.orderBy(desc(projects.featured), desc(projects.createdAt)).limit(limit);
-  return rows;
+  return rows.map(localizeImages);
 }
 
 export async function getProjectBySlug(slug: string) {
   await ensureSeeded();
   const rows = await db.select().from(projects).where(eq(projects.slug, slug)).limit(1);
-  return rows[0];
+  return rows[0] ? localizeImages(rows[0]) : rows[0];
 }
 
 export async function getAllProjectSlugs() {
@@ -241,13 +246,14 @@ export async function getAllProjectSlugs() {
 
 export async function getPosts(limit = 6) {
   await ensureSeeded();
-  return db.select().from(posts).orderBy(desc(posts.publishedAt)).limit(limit);
+  const rows = await db.select().from(posts).orderBy(desc(posts.publishedAt)).limit(limit);
+  return rows.map(localizeImages);
 }
 
 export async function getPostBySlug(slug: string) {
   await ensureSeeded();
   const rows = await db.select().from(posts).where(eq(posts.slug, slug)).limit(1);
-  return rows[0];
+  return rows[0] ? localizeImages(rows[0]) : rows[0];
 }
 
 export async function getAllPostSlugs() {
@@ -289,7 +295,7 @@ export async function getPlatformStats() {
 
 export async function getFavoritePropertiesForUser(userId: number) {
   await ensureSeeded();
-  return db
+  const rows = await db
     .select({
       id: properties.id,
       slug: properties.slug,
@@ -313,6 +319,7 @@ export async function getFavoritePropertiesForUser(userId: number) {
     .innerJoin(properties, eq(favorites.propertyId, properties.id))
     .where(eq(favorites.userId, userId))
     .orderBy(desc(favorites.createdAt));
+  return rows.map(localizeImages);
 }
 
 export async function getInquiriesForEmail(email: string) {
